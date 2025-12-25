@@ -1,17 +1,11 @@
-from fastapi import FastAPI, HTTPException, Query, WebSocket
-from typing import List, Optional
+from fastapi import FastAPI, HTTPException, Query
+from typing import List
 from main import *
 from pydantic import BaseModel
 from typing import Union
 from fastapi.responses import ORJSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.security import OAuth2PasswordBearer
-from fastapi import Request, Response
-from datetime import datetime
-import time
-import os
-import yfinance as yf
 
 
 app = FastAPI(
@@ -21,6 +15,7 @@ app = FastAPI(
     docs_url="/docs",
     default_response_class=ORJSONResponse,
 )
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -56,7 +51,7 @@ class HistoricalPricesResponse(BaseModel):
 
 @app.get("/")
 async def read_root():
-    return {"Hello": "World"}
+    return {"Hello World"}
 
 
 @app.get("/health")
@@ -114,7 +109,7 @@ async def deleteFromFavourites(ticker: str = Query(..., description="Ticker symb
 
 
 @app.get("/get_ticker_list")
-async def get_tickers(category_id: int = Query( default=None, description="Category")):
+async def get_tickers(category_id: int = Query(default=None, description="Category")):
 
     try:
         data = readTickerList(category_id)
