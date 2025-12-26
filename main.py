@@ -299,7 +299,6 @@ def readFavorites():
     return data
 
 
-
 def RiskMetrics(ticker: str, risk_free_rate: float = 0.044) -> dict:
     tkr = yf.Ticker(ticker)
 
@@ -318,7 +317,7 @@ def RiskMetrics(ticker: str, risk_free_rate: float = 0.044) -> dict:
 
     hist = tkr.history(period="6mo")
     returns = hist["Close"].pct_change().dropna()
-    vol_60d = returns.std() * (252 ** 0.5)
+    vol_60d = returns.std() * (252**0.5)
     risk_adj_earnings_yield = earnings_yield / vol_60d
 
     total_debt = tkr.balance_sheet.loc["Total Debt"].iloc[0]
@@ -343,11 +342,6 @@ def RiskMetrics(ticker: str, risk_free_rate: float = 0.044) -> dict:
         "vix": vix,
         "yield_spread": yield_spread,
     }
-
-
-
-
-
 
 
 def get_data(
@@ -470,7 +464,14 @@ def read_db_v2(
                     cursor.executemany(
                         """INSERT INTO asset_prices 
                         (ticker_id, date, open, high, low, close, change,  period, timeframe)
-                        VALUES (%s,%s, %s, %s,%s, %s, %s, %s,%s )""",
+                        VALUES (%s,%s, %s, %s,%s, %s, %s, %s,%s )
+                        ON CONFLICT (ticker_id, date, timeframe) DO UPDATE
+                    SET open = EXCLUDED.open,
+                    high = EXCLUDED.high,
+                    low = EXCLUDED.low,
+                    close = EXCLUDED.close,
+                    change = EXCLUDED.change,
+                    period = EXCLUDED.perio""",
                         records,
                     )
 
