@@ -463,15 +463,15 @@ def read_db_v2(
 
                     cursor.executemany(
                         """INSERT INTO asset_prices 
-                        (ticker_id, date, open, high, low, close, change,  period, timeframe)
-                        VALUES (%s,%s, %s, %s,%s, %s, %s, %s,%s )
-                        ON CONFLICT (ticker_id, date, timeframe) DO UPDATE
+                    (ticker_id, date, open, high, low, close, change, period, timeframe)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (ticker_id, date, timeframe) DO UPDATE
                     SET open = EXCLUDED.open,
                     high = EXCLUDED.high,
                     low = EXCLUDED.low,
                     close = EXCLUDED.close,
                     change = EXCLUDED.change,
-                    period = EXCLUDED.perio""",
+                    period = EXCLUDED.period""",
                         records,
                     )
 
