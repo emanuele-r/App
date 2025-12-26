@@ -1,4 +1,4 @@
-category_id=$(psql -d asset_prices -tA -c "
+category_id=$(psql -p 5433 -d asset_prices -tA -c "
 WITH ins AS (
     INSERT INTO category(name)
     VALUES ('Shares')
@@ -13,7 +13,7 @@ LIMIT 1;
 
 
 
-exchange_id=$(psql -d asset_prices -tA -c "
+exchange_id=$(psql -p 5433 -d asset_prices -tA -c "
 WITH ins AS (
     INSERT INTO exchanges(name)
     VALUES ('Nasdaq')
@@ -38,4 +38,4 @@ while IFS=',' read -r ticker close change; do
     VALUES ('$ticker', $category_id, $change_clean, $close_clean, $exchange_id)
     ON CONFLICT (ticker) DO NOTHING;
     "
-done | psql -d asset_prices
+done | psql -p 5433 -d asset_prices

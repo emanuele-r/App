@@ -108,6 +108,16 @@ async def deleteFromFavourites(ticker: str = Query(..., description="Ticker symb
     return {"message": "Removed successfully"}
 
 
+@app.post("/get_risk_metrics")
+def get_risk_metrics(ticker: str = Query(..., description="Ticker symbol")):
+    try : 
+        data=RiskMetrics(ticker)
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+   
+
+
 @app.get("/get_ticker_list")
 async def get_tickers(category_id: int = Query(default=None, description="Category")):
 

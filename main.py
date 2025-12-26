@@ -14,10 +14,10 @@ import psycopg
 def create_db():
     with psycopg.connect(
         dbname="asset_prices",
-        user="emanuelerossi",
+        user="postgres",
         password="strongpassword",
-        host="127.0.0.1",
-        port=5432,
+        host="46.224.51.58",
+        port=5433,
     ) as conn:
         with conn.cursor() as cursor:
 
@@ -193,10 +193,10 @@ create_db()
 def get_pg_connection():
     return psycopg.connect(
         dbname="asset_prices",
-        user="emanuelerossi",
+        user="postgres",
         password="strongpassword",
-        host="127.0.0.1",
-        port=5432,
+        host="46.224.51.58",
+        port=5433,
     )
 
 
@@ -299,6 +299,57 @@ def readFavorites():
     return data
 
 
+
+def RiskMetrics(ticker: str, risk_free_rate: float = 0.044) -> dict:
+    tkr = yf.Ticker(ticker)
+
+    price = tkr.fast_info["last_price"]
+    income_stmt = tkr.income_stmt
+    eps = income_stmt.iloc[income_stmt.index.get_loc("Basic EPS"), 0]
+
+    earnings_yield = eps / price
+    yield_spread = earnings_yield - risk_free_rate
+    pe_ratio = 1 / earnings_yield
+
+    cf = tkr.cashflow
+    fcf = cf.loc["Free Cash Flow"].iloc[0]
+    market_cap = tkr.fast_info["market_cap"]
+    fcf_yield = fcf / market_cap
+
+    hist = tkr.history(period="6mo")
+    returns = hist["Close"].pct_change().dropna()
+    vol_60d = returns.std() * (252 ** 0.5)
+    risk_adj_earnings_yield = earnings_yield / vol_60d
+
+    total_debt = tkr.balance_sheet.loc["Total Debt"].iloc[0]
+    ebitda = tkr.financials.loc["EBITDA"].iloc[0]
+    leverage = total_debt / ebitda
+
+    vix = yf.Ticker("^VIX").fast_info["last_price"]
+    price_of_risk = earnings_yield / (vix / 100)
+
+    if eps <= 0 or price <= 0 or vix <= 0 or ebitda <= 0 or market_cap <= 0:
+        raise ValueError("Invalid inputs for valuation or risk metrics")
+
+    return {
+        "ticker": ticker,
+        "earnings_yield": earnings_yield,
+        "fcf_yield": fcf_yield,
+        "pe_ratio": pe_ratio,
+        "vol_60d": vol_60d,
+        "risk_adj_earnings_yield": risk_adj_earnings_yield,
+        "price_of_risk": price_of_risk,
+        "leverage": leverage,
+        "vix": vix,
+        "yield_spread": yield_spread,
+    }
+
+
+
+
+
+
+
 def get_data(
     ticker: str,
     start_date: str = None,
@@ -374,13 +425,13 @@ def read_db_v2(
         with get_pg_connection() as conn:
             cursor = conn.cursor()
 
-            cursor.execute("SELECT id FROM ticker_list WHERE ticker = ?", (ticker,))
+            cursor.execute("SELECT id FROM ticker_list WHERE ticker = %s", (ticker,))
             ticker_id_row = cursor.fetchone()
             ticker_id = ticker_id_row[0]
 
             cursor.execute(
-                """select max(date) from asset_prices where ticker_id = ?
-                and timeframe = ?""",
+                """select max(date) from asset_prices where ticker_id = %s
+                and timeframe = %s""",
                 (ticker_id, timeframe),
             )
             isUpToDate = cursor.fetchone()[0]
@@ -417,21 +468,21 @@ def read_db_v2(
                     ]
 
                     cursor.executemany(
-                        """INSERT OR REPLACE INTO asset_prices 
+                        """INSERT INTO asset_prices 
                         (ticker_id, date, open, high, low, close, change,  period, timeframe)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ? )""",
+                        VALUES (%s,%s, %s, %s,%s, %s, %s, %s,%s )""",
                         records,
                     )
 
             if start_date and end_date:
                 cursor.execute(
                     "SELECT * FROM asset_prices "
-                    "WHERE date BETWEEN ? AND ? AND ticker_id = ? AND timeframe = ?",
+                    "WHERE date BETWEEN %s AND %s  AND ticker_id = %s AND timeframe = %s",
                     (start_date, end_date, ticker_id, timeframe),
                 )
             else:
                 cursor.execute(
-                    "SELECT * FROM asset_prices WHERE ticker_id= ? AND timeframe = ?",
+                    "SELECT * FROM asset_prices WHERE ticker_id= %s AND timeframe = %s",
                     (ticker_id, timeframe),
                 )
 
@@ -451,16 +502,16 @@ def helperFunctionPattern(
 ):
     with get_pg_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("select id from ticker_list where ticker = ?", (ticker,))
+        cursor.execute("select id from ticker_list where ticker = %s ", (ticker,))
         ticker_id = cursor.fetchone()[0]
         if start_date and end_date:
             cursor.execute(
-                "select close, date from asset_prices where ticker_id = ? and timeframe = ? and date between ? and ? order by date",
+                "select close, date from asset_prices where ticker_id = %s  and timeframe = %s and date between %s and %s order by date",
                 (ticker_id, timeframe, start_date, end_date),
             )
         else:
             cursor.execute(
-                "select close, date from asset_prices where ticker_id = ? and timeframe = ? order by date",
+                "select close, date from asset_prices where ticker_id = %s and timeframe = %s order by date",
                 (ticker_id, timeframe),
             )
 
@@ -473,16 +524,16 @@ def helperFunctionOhlcPattern(
 ):
     with get_pg_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("select id from ticker_list where ticker = ?", (ticker,))
+        cursor.execute("select id from ticker_list where ticker = %s", (ticker,))
         ticker_id = cursor.fetchone()[0]
         if start_date and end_date:
             cursor.execute(
-                "select date,open,high,low,close from asset_prices where ticker_id = ? and timeframe = ? and date between ? and ? order by date",
+                "select date,open,high,low,close from asset_prices where ticker_id = %s and timeframe = %s and date between %s and %s order by date",
                 (ticker_id, timeframe, start_date, end_date),
             )
         else:
             cursor.execute(
-                "select date,open,high,low,close from asset_prices where ticker_id = ? and timeframe = ? order by date",
+                "select date,open,high,low,close from asset_prices where ticker_id = %s and timeframe = %s order by date",
                 (ticker_id, timeframe),
             )
 
@@ -493,12 +544,12 @@ def helperFunctionOhlcPattern(
 def Helper(ticker: str, start_date: str, end_date: str, timeframe: str = "1d"):
     with get_pg_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("select id from ticker_list where ticker = ?", (ticker,))
+        cursor.execute("select id from ticker_list where ticker = %s", (ticker,))
         ticker_id = cursor.fetchone()[0]
 
         cursor.execute(
             """
-            select open,high,low,close from asset_prices where ticker_id = ? and timeframe = ? and date between ? and ? order by date
+            select open,high,low,close from asset_prices where ticker_id = %s and timeframe = %s and date between $s  and %s order by date
             """,
             (ticker_id, timeframe, start_date, end_date),
         )
@@ -512,11 +563,11 @@ def calculate_query_return(ticker: str, start_date: str, end_date: str) -> float
     try:
         with get_pg_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("select id from ticker_list where ticker = ?", (ticker,))
+            cursor.execute("select id from ticker_list where ticker = %s", (ticker,))
             ticker_id = cursor.fetchone()[0]
             cursor.execute(
                 """
-                select close from asset_prices where ticker_id = ? and date between ? and ?
+                select close from asset_prices where ticker_id = %s and date between %s and %s
                 """,
                 (ticker_id, start_date, end_date),
             )

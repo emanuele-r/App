@@ -1,4 +1,4 @@
-category_id=$(psql -d asset_prices -tA -c "
+category_id=$(psql -p 5433 -d asset_prices -tA -c "
 WITH ins AS (
     INSERT INTO category(name)
     VALUES ('Crypto')
@@ -11,7 +11,7 @@ SELECT category_id FROM category WHERE name = 'Crypto'
 LIMIT 1;
 ")
 
-exchange_id=$(psql -d asset_prices -tA -c "
+exchange_id=$(psql -p 5433 -d asset_prices -tA -c "
 WITH ins AS (
     INSERT INTO exchanges(name)
     VALUES ('Yahoo')
@@ -20,7 +20,7 @@ WITH ins AS (
 )
 SELECT id FROM ins
 UNION ALL
-SELECT id FROM exchanges WHERE name = 'Crypto'
+SELECT id FROM exchanges WHERE name = 'Yahoo'
 LIMIT 1;
 ")
 
@@ -31,4 +31,4 @@ while IFS=',' read -r ticker close change;do
     echo "insert into ticker_list (ticker, category_id ,change, close, exchange_id) 
     values ('$ticker-USD', '$category_id',  '$change' , '$close', '$exchange_id')
     ON CONFLICT (ticker) DO NOTHING;"
-done | psql -d asset_prices
+done | psql -p 5433  -d asset_prices
