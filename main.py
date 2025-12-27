@@ -429,35 +429,39 @@ async def read_db_v2(
 
                 needs_update = isUpToDate != today
 
-                if needs_update:
-                    if timeframe != "1d":
-                        upData = get_data(ticker=ticker, timeframe=timeframe)
-                    else:
-                        upData = get_data(
-                            ticker=ticker,
-                            start_date="2008-01-01",
-                            end_date=today,
-                            timeframe=timeframe,
+                fetch_start_date = (
+                    (pd.to_datetime(isUpToDate) + pd.Timedelta(days=1)).strftime(
+                        "%Y-%m-%d"
+                    )
+                    if isUpToDate is not None
+                    else "2008-01-01"
+                )
+
+                upData = get_data(
+                    ticker=ticker,
+                    start_date=fetch_start_date,
+                    end_date=today,
+                    timeframe=timeframe,
+                )
+
+                if not upData.empty:
+                    records = [
+                        (
+                            ticker_id,
+                            str(row.date),
+                            row.open,
+                            row.high,
+                            row.low,
+                            row.close,
+                            row.change,
+                            row.period,
+                            timeframe,
                         )
+                        for row in upData.itertuples(index=False)
+                    ]
 
-                    if not upData.empty:
-                        records = [
-                            (
-                                ticker_id,
-                                str(row.date),
-                                row.open,
-                                row.high,
-                                row.low,
-                                row.close,
-                                row.change,
-                                row.period,
-                                timeframe,
-                            )
-                            for row in upData.itertuples(index=False)
-                        ]
-
-                        await cursor.executemany(
-                            """
+                    await cursor.executemany(
+                        """
                             INSERT INTO asset_prices 
                             (ticker_id, date, open, high, low, close, change, period, timeframe)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -469,8 +473,8 @@ async def read_db_v2(
                                 change = EXCLUDED.change,
                                 period = EXCLUDED.period
                             """,
-                            records,
-                        )
+                        records,
+                    )
 
                 if start_date and end_date:
                     await cursor.execute(
