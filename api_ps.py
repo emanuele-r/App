@@ -6,6 +6,8 @@ from typing import Union
 from fastapi.responses import ORJSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+import redis.asyncio as redis
+import orjson
 
 
 app = FastAPI(
@@ -49,6 +51,9 @@ class HistoricalPricesResponse(BaseModel):
     prices: List[HistoricalPrice]
 
 
+redis_client = redis.Redis(host="localhost", port=6379, decode_responses=True)
+
+
 @app.get("/")
 async def read_root():
     return {"Hello World"}
@@ -56,13 +61,21 @@ async def read_root():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok, faggot"}
+    return {"status": "ok, connected"}
 
 
 @app.get("/get_favorites")
 async def get_favorites_ticker():
     try:
-        data = readFavorites()
+
+        cache_key = "favourites"
+
+        cached = await redis_client.get(cache_key)
+
+        if cached:
+            return orjson.loads(cached)
+
+        data = await readFavorites()
 
         categoryTypes = [
             {
@@ -85,6 +98,8 @@ async def get_favorites_ticker():
 
         favourites = {"categoryTypes": categoryTypes, "tickers": tickers}
 
+        await redis_client.set(cache_key, orjson.dumps(favourites).decode(), ex=60)
+
         return favourites
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -93,7 +108,7 @@ async def get_favorites_ticker():
 @app.post("/update_favorites")
 async def addToFavourites(ticker: str = Query(..., description="Ticker symbol")):
     try:
-        insertDataIntoFavourites(ticker)
+        await insertDataIntoFavourites(ticker)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     return {"message": "Updated successfully"}
@@ -102,7 +117,7 @@ async def addToFavourites(ticker: str = Query(..., description="Ticker symbol"))
 @app.post("/delete_favorites")
 async def deleteFromFavourites(ticker: str = Query(..., description="Ticker symbol")):
     try:
-        deleteDataFromFavourites(ticker)
+        await deleteDataFromFavourites(ticker)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     return {"message": "Removed successfully"}
@@ -110,19 +125,27 @@ async def deleteFromFavourites(ticker: str = Query(..., description="Ticker symb
 
 @app.post("/get_risk_metrics")
 def get_risk_metrics(ticker: str = Query(..., description="Ticker symbol")):
-    try : 
-        data=RiskMetrics(ticker)
+    try:
+        data = RiskMetrics(ticker)
         return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-   
 
 
 @app.get("/get_ticker_list")
 async def get_tickers(category_id: int = Query(default=None, description="Category")):
 
     try:
-        data = readTickerList(category_id)
+
+        cached_key = "ticker_list"
+
+        cached = await redis_client.get(cached_key)
+
+        if cached:
+            return orjson.loads(cached)
+
+        data = await readTickerList(category_id)
+
         tickers = [
             {
                 "category": category_id,
@@ -134,6 +157,8 @@ async def get_tickers(category_id: int = Query(default=None, description="Catego
         ]
         prices = {"tickers": tickers}
 
+        await redis_client.set(cached_key, orjson.dumps(prices), ex=3600)
+
         return prices
 
     except Exception as e:
@@ -143,11 +168,21 @@ async def get_tickers(category_id: int = Query(default=None, description="Catego
 @app.get("/get_category_list")
 async def fetch_category_list():
     try:
-        data = readCategory()
+        cache_key = "category"
+        
+        cached = await redis_client.get(cache_key)
+
+        if cached:
+            return orjson.loads(cached)
+        
+        data = await readCategory()
         category = [
             {"category_id": category_id, "category_name": name}
             for category_id, name in data
         ]
+        
+        await redis_client.set(cache_key, orjson.dumps(category), ex=3600)
+        
         return category
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -163,9 +198,17 @@ async def read_data(
     """
     Example usage : POST /historical_prices?ticker=AAPL
     """
+
     ticker = ticker.upper()
     try:
-        data = read_db_v2(
+
+        cached_key = f"hist:{ticker}:{timeframe}"
+
+        cached = await redis_client.get(cached_key)
+        if cached:
+            return orjson.loads(cached)
+
+        data = await read_db_v2(
             ticker=ticker, start_date=start_date, end_date=end_date, timeframe=timeframe
         )
 
@@ -179,6 +222,8 @@ async def read_data(
                     "close": float(data_row["close"]),
                 }
             )
+
+        await redis_client.set(cached_key, orjson.dumps(chartData), ex=86400)
 
         return chartData
 
@@ -249,8 +294,8 @@ async def get_patterns(
     ticker = ticker.upper()
     try:
 
-        query_data = helperFunctionPattern(ticker, start_date, end_date, timeframe)
-        reference_data = helperFunctionPattern(ticker, timeframe)
+        query_data = await helperFunctionPattern(ticker, start_date, end_date, timeframe)
+        reference_data = await helperFunctionPattern(ticker, timeframe)
 
         query = [row[0] for row in query_data]
         array2 = [row[0] for row in reference_data]
@@ -266,13 +311,13 @@ async def get_patterns(
                 status_code=404, detail="No data found for the given date range"
             )
 
-        query_return = calculate_query_return(ticker, start_date, end_date)
+        query_return = await calculate_query_return(ticker, start_date, end_date)
 
         best_indices, best_dates, best_subarrays, best_distances, query, array2 = (
             array_with_shift(query, array2, dates, k=k, metric=metric, wrap=wrap)
         )
 
-        summary = pattern_forward_return(ticker, best_dates)
+        summary = await pattern_forward_return(ticker, best_dates)
 
         matches = []
         for i, (dates_, values, dist) in enumerate(
@@ -314,8 +359,8 @@ async def get_patterns(
     ticker = ticker.upper()
 
     try:
-        query_data = helperFunctionOhlcPattern(ticker, start_date, end_date, timeframe)
-        reference_data = helperFunctionOhlcPattern(ticker, timeframe)
+        query_data = await helperFunctionOhlcPattern(ticker, start_date, end_date, timeframe)
+        reference_data = await helperFunctionOhlcPattern(ticker, timeframe)
 
         query = [row[4] for row in query_data]
         array2 = [row[4] for row in reference_data]
@@ -331,7 +376,7 @@ async def get_patterns(
                 status_code=404, detail="No data found for the given date range"
             )
 
-        query_return = calculate_query_return(ticker, start_date, end_date)
+        query_return = await calculate_query_return(ticker, start_date, end_date)
 
         best_indices, best_dates, best_subarrays, best_distances, query, array2 = (
             array_with_shift(query, array2, dates, k=k, metric=metric, wrap=wrap)
@@ -375,7 +420,7 @@ async def fetch_news(
     lang: str = Query(default="en", description="Language for news search"),
 ):
     try:
-        news = getNews(query, lang)
+        news = await getNews(query, lang)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"News search failed: {str(e)}")
     return news
