@@ -27,8 +27,7 @@ LIMIT 1;
 ")
 
 
-
-awk -F ',' 'NR>1 {print $1", "$3", "$5}' nq.csv |
+awk -F ',' 'NR>1 && NF==6 && $1 && $3 && $5 {print $1","$3","$5}' nq.csv |
 while IFS=',' read -r ticker close change; do
     change_clean=$(echo "$change" | sed 's/[^0-9.-]//g')
     close_clean=$(echo "$close" | sed 's/[^0-9.-]//g')

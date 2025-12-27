@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 import psycopg
 import httpx
 import state
-
+import asyncio
 
 def create_db():
     with psycopg.connect(
@@ -215,7 +215,7 @@ async def readTickerList(category: str = None):
                     """
                     SELECT ticker, category_id, change, close
                     FROM ticker_list
-                    
+                    LIMIT 500
                     """
                 )
             data = await cursor.fetchall()
@@ -437,7 +437,7 @@ async def read_db_v2(
                     else "2008-01-01"
                 )
 
-                upData = get_data(
+                upData = await asyncio.to_thread(get_data,
                     ticker=ticker,
                     start_date=fetch_start_date,
                     end_date=today,
@@ -480,13 +480,13 @@ async def read_db_v2(
                     await cursor.execute(
                         """
                         SELECT * FROM asset_prices 
-                        WHERE date BETWEEN %s AND %s AND ticker_id = %s AND timeframe = %s
+                        WHERE date BETWEEN %s AND %s AND ticker_id = %s AND timeframe = %s ORDER BY date ASC
                         """,
                         (start_date, end_date, ticker_id, timeframe),
                     )
                 else:
                     await cursor.execute(
-                        "SELECT * FROM asset_prices WHERE ticker_id = %s AND timeframe = %s",
+                        "SELECT * FROM asset_prices WHERE ticker_id = %s AND timeframe = %s  ORDER BY date ASC" ,
                         (ticker_id, timeframe),
                     )
 
@@ -577,7 +577,7 @@ async def calculate_query_return(ticker: str, start_date: str, end_date: str) ->
                     "select id from ticker_list where ticker = %s", (ticker,)
                 )
                 ticker_id = await cursor.fetchone()[0]
-                cursor.execute(
+               await cursor.execute(
                     """
                     select close from asset_prices where ticker_id = %s and date between %s and %s
                     """,

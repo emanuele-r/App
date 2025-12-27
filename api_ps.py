@@ -266,9 +266,13 @@ async def get_ohlc_endpoint(
     Example: POST /get_ohlc?ticker=btc-usd&start_date=2024-01-01&end_date=2024-12-31&timeframe=1d
     """
     ticker = ticker.upper()
-
+		
     try:
-        data = read_db_v2(
+	cached_key= f"{ticker}:{start_date}:{end_date}:{timeframe}"
+	cached = await redis_client.get(cached_key)
+	if cached:
+	return orsjon.loads(cached)
+        data = await read_db_v2(
             ticker=ticker, start_date=start_date, end_date=end_date, timeframe=timeframe
         )
         if data.empty:
@@ -287,6 +291,8 @@ async def get_ohlc_endpoint(
                     "timeframe": str(data_row["timeframe"]),
                 }
             )
+	
+	await redis_client=set(cached_key, orjson.dumps(cached_key), ex=60)
 
         return ohlc_data
 
@@ -315,6 +321,11 @@ async def get_patterns(
 
     ticker = ticker.upper()
     try:
+	cached_key = f"patterns:{ticker}:{start_date}:{end_date}:{timeframe}"
+
+        cached = await redis_client.get(cached_key)
+        if cached:
+            return orjson.loads(cached)
 
         query_data = await helperFunctionPattern(
             ticker, start_date, end_date, timeframe
@@ -355,6 +366,8 @@ async def get_patterns(
                 description=f"{ticker} pattern match {i + 1}",
             )
             matches.append(match)
+	 await redis_client.set(cached_key, orjson.dumps(matches), ex=3600)
+
 
         return matches, summary
 
