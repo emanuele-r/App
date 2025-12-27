@@ -8,6 +8,25 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 import redis.asyncio as redis
 import orjson
+from contextlib import asynccontextmanager
+from psycopg_pool import AsyncConnectionPool
+import state
+
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    state.pg_pool = AsyncConnectionPool(
+        conninfo="postgresql://postgres:strongpassword@127.0.0.1:5433/asset_prices",
+        min_size=5,
+        max_size=20,
+        timeout=30,
+    )
+    await state.pg_pool.open()
+    try:
+        yield
+    finally:
+        await state.pg_pool.close()
 
 
 app = FastAPI(
@@ -16,6 +35,7 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/docs",
     default_response_class=ORJSONResponse,
+    lifespan=lifespan,
 )
 
 
@@ -169,20 +189,20 @@ async def get_tickers(category_id: int = Query(default=None, description="Catego
 async def fetch_category_list():
     try:
         cache_key = "category"
-        
+
         cached = await redis_client.get(cache_key)
 
         if cached:
             return orjson.loads(cached)
-        
+
         data = await readCategory()
         category = [
             {"category_id": category_id, "category_name": name}
             for category_id, name in data
         ]
-        
+
         await redis_client.set(cache_key, orjson.dumps(category), ex=3600)
-        
+
         return category
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -294,7 +314,9 @@ async def get_patterns(
     ticker = ticker.upper()
     try:
 
-        query_data = await helperFunctionPattern(ticker, start_date, end_date, timeframe)
+        query_data = await helperFunctionPattern(
+            ticker, start_date, end_date, timeframe
+        )
         reference_data = await helperFunctionPattern(ticker, timeframe)
 
         query = [row[0] for row in query_data]
@@ -359,7 +381,9 @@ async def get_patterns(
     ticker = ticker.upper()
 
     try:
-        query_data = await helperFunctionOhlcPattern(ticker, start_date, end_date, timeframe)
+        query_data = await helperFunctionOhlcPattern(
+            ticker, start_date, end_date, timeframe
+        )
         reference_data = await helperFunctionOhlcPattern(ticker, timeframe)
 
         query = [row[4] for row in query_data]

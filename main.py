@@ -3,21 +3,18 @@ import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 import time
 import yfinance as yf
-import sqlite3
 from datetime import datetime, timedelta
-import requests
 import os
 from dotenv import load_dotenv
 import psycopg
 import httpx
-
-
+import state
 def create_db():
     with psycopg.connect(
         dbname="asset_prices",
         user="postgres",
         password="strongpassword",
-        host="host.docker.internal:5433",
+        host="127.0.0.1",
         port=5433,
     ) as conn:
         with conn.cursor() as cursor:
@@ -191,18 +188,10 @@ def create_db():
 create_db()
 
 
-async def get_pg_connection():
-    return await psycopg.AsyncConnection.connect(
-        dbname="asset_prices",
-        user="postgres",
-        password="strongpassword",
-        host="host.docker.internal:5433",
-        port=5433,
-    )
 
 
 async def readCategory():
-    async with await get_pg_connection() as conn:
+    async with state.pg_pool.connection() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute("SELECT * FROM category")
             data = await cursor.fetchall()
@@ -210,7 +199,7 @@ async def readCategory():
 
 
 async def readTickerList(category: str = None):
-    async with await get_pg_connection() as conn:
+    async with state.pg_pool.connection() as conn:
         async with conn.cursor() as cursor:
             if category:
                 await cursor.execute(
@@ -255,7 +244,7 @@ async def getNews(query: str, lang: str = "en") -> list[dict]:
 
 async def deleteDataFromFavourites(ticker: str):
     ticker = ticker.upper()
-    async with await get_pg_connection() as conn:
+    async with state.pg_pool.connection() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(
                 "SELECT id FROM ticker_list WHERE ticker = %s", (ticker,)
@@ -271,7 +260,7 @@ async def deleteDataFromFavourites(ticker: str):
 
 async def insertDataIntoFavourites(ticker: str):
     ticker = ticker.upper()
-    async with await get_pg_connection() as conn:
+    async with state.pg_pool.connection() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(
                 """
@@ -291,7 +280,7 @@ async def insertDataIntoFavourites(ticker: str):
 
 
 async def readFavorites():
-    async with await get_pg_connection() as conn:
+    async with state.pg_pool.connection() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(
                 """
@@ -421,7 +410,7 @@ async def read_db_v2(
     )
 
     try:
-        async with await get_pg_connection() as conn:
+        async with state.pg_pool.connection() as conn:
             async with conn.cursor() as cursor:
 
                 await cursor.execute(
@@ -430,11 +419,11 @@ async def read_db_v2(
                 ticker_id_row = await cursor.fetchone()
                 ticker_id = ticker_id_row[0]
 
-            await cursor.execute(
-                """select max(date) from asset_prices where ticker_id = %s
+                await cursor.execute(
+                    """select max(date) from asset_prices where ticker_id = %s
                 and timeframe = %s""",
-                (ticker_id, timeframe),
-            )
+                    (ticker_id, timeframe),
+                )
             isUpToDate = await cursor.fetchone()[0]
             needs_update = isUpToDate != today
 
@@ -508,7 +497,7 @@ async def read_db_v2(
 async def helperFunctionPattern(
     ticker: str, start_date: str = None, end_date: str = None, timeframe: str = "1d"
 ):
-    async with await get_pg_connection() as conn:
+    async with state.pg_pool.connection() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(
                 "select id from ticker_list where ticker = %s ", (ticker,)
@@ -532,7 +521,7 @@ async def helperFunctionPattern(
 async def helperFunctionOhlcPattern(
     ticker: str, start_date: str = None, end_date: str = None, timeframe: str = "1d"
 ):
-    async with await get_pg_connection() as conn:
+    async with state.pg_pool.connection() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(
                 "select id from ticker_list where ticker = %s ", (ticker,)
@@ -554,7 +543,7 @@ async def helperFunctionOhlcPattern(
 
 
 async def Helper(ticker: str, start_date: str, end_date: str, timeframe: str = "1d"):
-    async with await get_pg_connection() as conn:
+    async with state.pg_pool.connection() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(
                 "select id from ticker_list where ticker = %s", (ticker,)
@@ -575,7 +564,7 @@ async def Helper(ticker: str, start_date: str, end_date: str, timeframe: str = "
 
 async def calculate_query_return(ticker: str, start_date: str, end_date: str) -> float:
     try:
-        async with await get_pg_connection() as conn:
+        async with state.pg_pool.connection() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute(
                     "select id from ticker_list where ticker = %s", (ticker,)
@@ -701,9 +690,11 @@ async def pattern_forward_return(
     monthly_returns = []
     pattern_returns = []
 
-    async with await get_pg_connection() as conn:
+    async with state.pg_pool.connection() as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute("SELECT id FROM ticker_list WHERE ticker = %s", (ticker,))
+            await cursor.execute(
+                "SELECT id FROM ticker_list WHERE ticker = %s", (ticker,)
+            )
             ticker_id_row = await cursor.fetchone()
             if not ticker_id_row:
                 raise ValueError(f"Ticker {ticker} not found")
@@ -711,8 +702,10 @@ async def pattern_forward_return(
 
             start_date = min(p[0] for p in best_dates)
             end_date = max(p[-1] for p in best_dates)
-            max_window_end = (datetime.strptime(end_date, "%Y-%m-%d %H:%M:%S") +
-                              timedelta(days=rolling_window_high)).strftime("%Y-%m-%d %H:%M:%S")
+            max_window_end = (
+                datetime.strptime(end_date, "%Y-%m-%d %H:%M:%S")
+                + timedelta(days=rolling_window_high)
+            ).strftime("%Y-%m-%d %H:%M:%S")
 
             await cursor.execute(
                 """
@@ -750,30 +743,53 @@ async def pattern_forward_return(
         if len(monthly_data) < 2:
             continue
 
-        avgReturnForPattern = (pattern_data["close"].iloc[-1] / pattern_data["close"].iloc[0] - 1) * 100
-        sevenDayReturnAfterPattern = (weekly_data["close"].iloc[-1] / weekly_data["close"].iloc[0] - 1) * 100
-        monthlyReturnAfterPattern = (monthly_data["close"].iloc[-1] / monthly_data["close"].iloc[0] - 1) * 100
+        avgReturnForPattern = (
+            pattern_data["close"].iloc[-1] / pattern_data["close"].iloc[0] - 1
+        ) * 100
+        sevenDayReturnAfterPattern = (
+            weekly_data["close"].iloc[-1] / weekly_data["close"].iloc[0] - 1
+        ) * 100
+        monthlyReturnAfterPattern = (
+            monthly_data["close"].iloc[-1] / monthly_data["close"].iloc[0] - 1
+        ) * 100
 
         pattern_returns.append(avgReturnForPattern)
         seven_day_returns.append(sevenDayReturnAfterPattern)
         monthly_returns.append(monthlyReturnAfterPattern)
 
-        forward_return.append({
-            "patternIdx": idx,
-            "sevenDayReturnAfterPattern": sevenDayReturnAfterPattern,
-            "monthlyReturnAfterPattern": monthlyReturnAfterPattern,
-        })
+        forward_return.append(
+            {
+                "patternIdx": idx,
+                "sevenDayReturnAfterPattern": sevenDayReturnAfterPattern,
+                "monthlyReturnAfterPattern": monthlyReturnAfterPattern,
+            }
+        )
 
-    summary = [{
-        "Pattern": forward_return,
-        "summary": {
-            "Average 7 day return": sum(seven_day_returns) / len(seven_day_returns) if seven_day_returns else 0,
-            "Average 30 day return": sum(monthly_returns) / len(monthly_returns) if monthly_returns else 0,
-            "Pattern Average return": sum(pattern_returns) / len(pattern_returns) if pattern_returns else 0,
+    summary = [
+        {
+            "Pattern": forward_return,
+            "summary": {
+                "Average 7 day return": (
+                    sum(seven_day_returns) / len(seven_day_returns)
+                    if seven_day_returns
+                    else 0
+                ),
+                "Average 30 day return": (
+                    sum(monthly_returns) / len(monthly_returns)
+                    if monthly_returns
+                    else 0
+                ),
+                "Pattern Average return": (
+                    sum(pattern_returns) / len(pattern_returns)
+                    if pattern_returns
+                    else 0
+                ),
+            },
         }
-    }]
+    ]
 
     return summary
+
 
 def dynamic_time_warping(
     array,
