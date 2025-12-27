@@ -327,7 +327,7 @@ async def get_patterns(
         query_data = await helperFunctionPattern(
             ticker, start_date, end_date, timeframe
         )
-        reference_data = await helperFunctionPattern(ticker,None, None , timeframe)
+        reference_data = await helperFunctionPattern(ticker, None, None, timeframe)
 
         if not query_data:
             raise HTTPException(
@@ -336,19 +336,10 @@ async def get_patterns(
 
         if not reference_data:
             raise HTTPException(status_code=404, detail="No reference data found")
+        
         query = [row[0] for row in query_data]
         array2 = [row[0] for row in reference_data]
         dates = [row[1] for row in reference_data]
-
-        if not query_data:
-            raise HTTPException(
-                status_code=404, detail="No data found for the given date range"
-            )
-
-        if not reference_data:
-            raise HTTPException(
-                status_code=404, detail="No data found for the given date range"
-            )
 
         query_return = await calculate_query_return(ticker, start_date, end_date)
 
@@ -383,24 +374,27 @@ async def get_patterns(
             )
             matches.append(match)
 
-
         response_data = {
             "matches": [match.dict() for match in matches],
             "summary": summary
         }
-        
-        await redis_client.set(cached_key, orjson.dumps(response_data), ex=3600)
 
+        await redis_client.set(
+            cached_key, 
+            orjson.dumps(response_data), 
+            ex=3600
+        )
 
         return response_data
 
+    except HTTPException:
+        raise
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Pattern search failed: {str(e)}")
 
-
 @app.post("/get_multiple_patterns_ohcl")
-async def get_patterns(
+async def get_patterns_ohlc(
     ticker: str = Query(..., description="Ticker symbol"),
     start_date: str = Query(..., description="Start date (YYYY-MM-DD)"),
     end_date: str = Query(..., description="End date (YYYY-MM-DD)"),
@@ -425,10 +419,6 @@ async def get_patterns(
         )
         reference_data = await helperFunctionOhlcPattern(ticker, None, None, timeframe)
 
-        query = [row[4] for row in query_data]
-        array2 = [row[4] for row in reference_data]
-        dates = [row[0] for row in reference_data]
-
         if not query_data:
             raise HTTPException(
                 status_code=404, detail="No data found for the given date range"
@@ -436,8 +426,12 @@ async def get_patterns(
 
         if not reference_data:
             raise HTTPException(
-                status_code=404, detail="No data found for the given date range"
+                status_code=404, detail="No reference data found"
             )
+
+        query = [row[4] for row in query_data]
+        array2 = [row[4] for row in reference_data]
+        dates = [row[0] for row in reference_data]
 
         query_return = await calculate_query_return(ticker, start_date, end_date)
 
@@ -449,14 +443,15 @@ async def get_patterns(
         for idx, (indices, dates_, values, dist) in enumerate(
             zip(best_indices, best_dates, best_subarrays, best_distances)
         ):
-            data = await Helper(ticker, dates_[0], dates_[-1], timeframe)
+            data = await Helper(ticker, str(dates_[0]), str(dates_[-1]), timeframe)
+            
             match = {
                 "pattern_id": idx + 1,
-                "dates": [d for d in dates_],
-                "opens": [row[0] for row in data],
-                "highs": [row[1] for row in data],
-                "lows": [row[2] for row in data],
-                "closes": [row[3] for row in data],
+                "dates": [str(d) for d in dates_],
+                "opens": [float(row[0]) for row in data],
+                "highs": [float(row[1]) for row in data],
+                "lows": [float(row[2]) for row in data],
+                "closes": [float(row[3]) for row in data],
                 "similarity": float(dist),
                 "query_return": float(query_return),
                 "description": f"{ticker} pattern match {idx+1}",
@@ -473,8 +468,12 @@ async def get_patterns(
             "patterns": matches,
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Pattern search failed: {str(e)}")
+
 
 
 @app.post("/get_news")
