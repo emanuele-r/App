@@ -511,7 +511,10 @@ async def helperFunctionPattern(
             await cursor.execute(
                 "select id from ticker_list where ticker = %s ", (ticker,)
             )
-            ticker_id = await cursor.fetchone()[0]
+            ticker_id = await cursor.fetchone()
+            if not ticker_id:
+                return None
+            id=ticker_id[0]
             if start_date and end_date:
                 await cursor.execute(
                     "select close, date from asset_prices where ticker_id = %s  and timeframe = %s and date between %s and %s order by date",
@@ -535,7 +538,10 @@ async def helperFunctionOhlcPattern(
             await cursor.execute(
                 "select id from ticker_list where ticker = %s ", (ticker,)
             )
-            ticker_id = await cursor.fetchone()[0]
+            ticker_id = await cursor.fetchone()
+            if not ticker_id:
+                return None
+            id=ticker_id[0]
             if start_date and end_date:
                 await cursor.execute(
                     "select close, date from asset_prices where ticker_id = %s  and timeframe = %s and date between %s and %s order by date",
