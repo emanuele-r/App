@@ -336,7 +336,7 @@ async def get_patterns(
 
         if not reference_data:
             raise HTTPException(status_code=404, detail="No reference data found")
-        
+
         query = [row[0] for row in query_data]
         array2 = [row[0] for row in reference_data]
         dates = [row[1] for row in reference_data]
@@ -376,13 +376,13 @@ async def get_patterns(
 
         response_data = {
             "matches": [match.dict() for match in matches],
-            "summary": summary
+            "summary": summary,
         }
 
         await redis_client.set(
-            cached_key, 
-            orjson.dumps(response_data), 
-            ex=3600
+            cached_key,
+            orjson.dumps(response_data, option=orjson.OPT_SERIALIZE_NUMPY),
+            ex=3600,
         )
 
         return response_data
@@ -393,87 +393,82 @@ async def get_patterns(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Pattern search failed: {str(e)}")
 
+
 @app.post("/get_multiple_patterns_ohcl")
 async def get_patterns_ohlc(
     ticker: str = Query(..., description="Ticker symbol"),
-    start_date: str = Query(..., description="Start date (YYYY-MM-DD)"),
-    end_date: str = Query(..., description="End date (YYYY-MM-DD)"),
+    start_date: str = Query(...),
+    end_date: str = Query(...),
     k: int = Query(3, description="Number of patterns to return"),
-    metric: str = Query("l2", description="Distance metric: 'l1' or 'l2'"),
-    wrap: bool = Query(True, description="Allow wrapping (circular search)"),
-    timeframe: str = Query(
-        "1d", description="Timeframe for the reference data ('1d', '1h', etc.)"
-    ),
+    metric: str = Query("l2", description="Distance metric"),
+    wrap: bool = Query(True),
+    timeframe: str = Query("1d"),
 ):
-
     if start_date >= end_date:
         raise HTTPException(
             status_code=400, detail="Start date must be less than end date"
         )
 
     ticker = ticker.upper()
-
     try:
+        cached_key = f"patterns_ohlc:{ticker}:{start_date}:{end_date}:{timeframe}"
+        cached = await redis_client.get(cached_key)
+        if cached:
+            return orjson.loads(cached)
+
         query_data = await helperFunctionOhlcPattern(
             ticker, start_date, end_date, timeframe
         )
-        reference_data = await helperFunctionOhlcPattern(ticker, None, None, timeframe)
+        reference_data = await helperFunctionOhlcPattern(ticker, timeframe)
 
-        if not query_data:
-            raise HTTPException(
-                status_code=404, detail="No data found for the given date range"
-            )
+        if not query_data or not reference_data:
+            raise HTTPException(status_code=404, detail="Pattern data unavailable")
 
-        if not reference_data:
-            raise HTTPException(
-                status_code=404, detail="No reference data found"
-            )
-
-        query = [row[4] for row in query_data]
-        array2 = [row[4] for row in reference_data]
-        dates = [row[0] for row in reference_data]
+        query = [row[3] for row in query_data]
+        array2 = [row[3] for row in reference_data]
+        dates = [row[4] for row in reference_data]
 
         query_return = await calculate_query_return(ticker, start_date, end_date)
 
-        best_indices, best_dates, best_subarrays, best_distances, query, array2 = (
-            array_with_shift(query, array2, dates, k=k, metric=metric, wrap=wrap)
+        _, best_dates, _, best_distances, _, _ = array_with_shift(
+            query, array2, dates, k=k, metric=metric, wrap=wrap
         )
 
-        matches = []
-        for idx, (indices, dates_, values, dist) in enumerate(
-            zip(best_indices, best_dates, best_subarrays, best_distances)
-        ):
-            data = await Helper(ticker, str(dates_[0]), str(dates_[-1]), timeframe)
-            
-            match = {
-                "pattern_id": idx + 1,
-                "dates": [str(d) for d in dates_],
-                "opens": [float(row[0]) for row in data],
-                "highs": [float(row[1]) for row in data],
-                "lows": [float(row[2]) for row in data],
-                "closes": [float(row[3]) for row in data],
-                "similarity": float(dist),
-                "query_return": float(query_return),
-                "description": f"{ticker} pattern match {idx+1}",
-            }
+        patterns = []
+        for idx, (dates_, dist) in enumerate(zip(best_dates, best_distances)):
+            ohlc_rows = await Helper(ticker, str(dates_[0]), str(dates_[-1]), timeframe)
 
-            matches.append(match)
+            patterns.append(
+                {
+                    "pattern_id": idx + 1,
+                    "dates": [str(d) for d in dates_],
+                    "opens": [float(r[0]) for r in ohlc_rows],
+                    "highs": [float(r[1]) for r in ohlc_rows],
+                    "lows": [float(r[2]) for r in ohlc_rows],
+                    "closes": [float(r[3]) for r in ohlc_rows],
+                    "similarity": float(dist),
+                    "description": f"{ticker} pattern match {idx + 1}",
+                }
+            )
 
-        return {
+        response_data = {
             "ticker": ticker,
-            "start_date": start_date,
-            "end_date": end_date,
-            "timeframe": timeframe,
             "query_return": float(query_return),
-            "patterns": matches,
+            "patterns": patterns,
         }
 
-    except HTTPException:
-        raise
+        await redis_client.set(
+            cached_key,
+            orjson.dumps(response_data, option=orjson.OPT_SERIALIZE_NUMPY),
+            ex=3600,
+        )
+        return response_data
+
     except Exception as e:
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Pattern search failed: {str(e)}")
-
+        raise HTTPException(
+            status_code=500, detail=f"OHLC Pattern search failed: {str(e)}"
+        )
 
 
 @app.post("/get_news")
