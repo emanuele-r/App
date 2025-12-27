@@ -1,3 +1,6 @@
+#!/bin/bash
+
+# Get category_id and exchange_id first
 category_id=$(psql -p 5433 -d asset_prices -tA -c "
 WITH ins AS (
     INSERT INTO category(name)
@@ -10,8 +13,6 @@ UNION ALL
 SELECT category_id FROM category WHERE name = 'Shares'
 LIMIT 1;
 ")
-
-
 
 exchange_id=$(psql -p 5433 -d asset_prices -tA -c "
 WITH ins AS (
@@ -26,15 +27,15 @@ SELECT id FROM exchanges WHERE name = 'Nasdaq'
 LIMIT 1;
 ")
 
+# Process CSV properly
+tail -n +2 nq.csv | while IFS=',' read -r symbol name last_sale net_change pct_change _rest; do
+    # Remove $ and % signs and convert to numbers
+    last_sale_clean=$(echo "$last_sale" | tr -d '$,' )
+    net_change_clean=$(echo "$net_change" | tr -d '$,' )
+    pct_change_clean=$(echo "$pct_change" | tr -d '%$,' )
 
-awk -F ',' 'NR>1 && NF==6 && $1 && $3 && $5 {print $1","$3","$5}' nq.csv |
-while IFS=',' read -r ticker close change; do
-    change_clean=$(echo "$change" | sed 's/[^0-9.-]//g')
-    close_clean=$(echo "$close" | sed 's/[^0-9.-]//g')
-
-    echo "
-    INSERT INTO ticker_list (ticker, category_id, change, close, exchange_id)
-    VALUES ('$ticker', $category_id, $change_clean, $close_clean, $exchange_id)
-    ON CONFLICT (ticker) DO NOTHING;
-    "
+    # Use last_sale_clean as close, pct_change_clean as change
+    echo "INSERT INTO ticker_list (ticker, category_id, change, close, exchange_id)
+          VALUES ('$symbol', $category_id, $pct_change_clean, $last_sale_clean, $exchange_id)
+          ON CONFLICT (ticker) DO NOTHING;"
 done | psql -p 5433 -d asset_prices

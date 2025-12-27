@@ -25,7 +25,7 @@ LIMIT 1;
 ")
 
 
-awk -F ',' 'NR>1 && NF==6 && $3 && $4 && $6 {print $3","$4","$6}' crypto.csv |
+awk -F ',' 'NR>1 && NF==6 && $3 && $4 && $6 {print $3","$4","$6}' cryptos.csv |
 while IFS=',' read -r ticker close change;do 
     echo "insert into ticker_list (ticker, category_id ,change, close, exchange_id) 
     values ('$ticker-USD', '$category_id',  '$change' , '$close', '$exchange_id')
