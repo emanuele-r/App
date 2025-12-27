@@ -291,7 +291,7 @@ async def get_ohlc_endpoint(
                 }
             )
 
-        await redis_client = set(cached_key, orjson.dumps(cached_key), ex=60)
+        await redis_client.set(cached_key, orjson.dumps(cached_key), ex=60)
 
         return ohlc_data
 
