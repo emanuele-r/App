@@ -514,16 +514,16 @@ async def helperFunctionPattern(
             ticker_id = await cursor.fetchone()
             if not ticker_id:
                 return None
-            id=ticker_id[0]
+            id = ticker_id[0]
             if start_date and end_date:
                 await cursor.execute(
                     "select close, date from asset_prices where ticker_id = %s  and timeframe = %s and date between %s and %s order by date",
-                    (id, timeframe, start_date, end_date),
+                    (ticker_id, timeframe, start_date, end_date),
                 )
             else:
                 await cursor.execute(
                     "select close, date from asset_prices where ticker_id = %s and timeframe = %s order by date",
-                    (id, timeframe),
+                    (ticker_id, timeframe),
                 )
 
             data = await cursor.fetchall()
@@ -541,16 +541,16 @@ async def helperFunctionOhlcPattern(
             ticker_id = await cursor.fetchone()
             if not ticker_id:
                 return None
-            id=ticker_id[0]
+            id = ticker_id[0]
             if start_date and end_date:
                 await cursor.execute(
                     "select close, date from asset_prices where ticker_id = %s  and timeframe = %s and date between %s and %s order by date",
-                    (id, timeframe, start_date, end_date),
+                    (ticker_id, timeframe, start_date, end_date),
                 )
             else:
                 await cursor.execute(
                     "select close, date from asset_prices where ticker_id = %s and timeframe = %s order by date",
-                    (id, timeframe),
+                    (ticker_id, timeframe),
                 )
 
             data = await cursor.fetchall()
@@ -702,7 +702,7 @@ def array_with_shift(
 
 async def pattern_forward_return(
     ticker: str,
-    best_dates: list[list[str]],
+    best_dates: list[list[any]],
     rolling_window_low: int = 7,
     rolling_window_high: int = 30,
 ) -> list[dict]:
@@ -722,12 +722,25 @@ async def pattern_forward_return(
                 raise ValueError(f"Ticker {ticker} not found")
             ticker_id = ticker_id_row[0]
 
-            start_date = min(p[0] for p in best_dates)
-            end_date = max(p[-1] for p in best_dates)
-            max_window_end = (
-                datetime.strptime(end_date, "%Y-%m-%d %H:%M:%S")
-                + timedelta(days=rolling_window_high)
-            ).strftime("%Y-%m-%d %H:%M:%S")
+            raw_start = min(p[0] for p in best_dates)
+            raw_end = max(p[-1] for p in best_dates)
+
+            def to_dt(d):
+                if isinstance(d, datetime):
+                    return d
+                if (
+                    hasattr(d, "year")
+                    and hasattr(d, "month")
+                    and hasattr(d, "day")
+                    and not hasattr(d, "hour")
+                ):
+                    return datetime.combine(d, datetime.min.time())
+                return pd.to_datetime(d).to_pydatetime()
+
+            start_dt = to_dt(raw_start)
+            end_dt = to_dt(raw_end)
+
+            max_window_end_dt = end_dt + timedelta(days=rolling_window_high + 5)
 
             await cursor.execute(
                 """
@@ -736,7 +749,7 @@ async def pattern_forward_return(
                 WHERE ticker_id = %s AND date >= %s AND date <= %s
                 ORDER BY date
                 """,
-                (ticker_id, start_date, max_window_end),
+                (ticker_id, start_dt.date(), max_window_end_dt.date()),
             )
             rows = await cursor.fetchall()
 
@@ -746,44 +759,51 @@ async def pattern_forward_return(
     df = pd.DataFrame(rows, columns=["date", "close"])
     df["date"] = pd.to_datetime(df["date"])
     df.set_index("date", inplace=True)
+    df = df[~df.index.duplicated(keep="first")]
 
     for idx, pat in enumerate(best_dates):
         pat_start = pd.to_datetime(pat[0])
         pat_end = pd.to_datetime(pat[-1])
 
         pattern_data = df.loc[pat_start:pat_end]
-        if pattern_data.empty:
+        if len(pattern_data) < 2:
+            continue
+
+        post_pattern_data = df.loc[pat_end:]
+        if post_pattern_data.empty:
             continue
 
         end_week_dt = pat_end + pd.Timedelta(days=rolling_window_low)
-        weekly_data = df.loc[pat_end:end_week_dt]
-        if len(weekly_data) < 2:
-            continue
+        weekly_data = post_pattern_data.loc[pat_end:end_week_dt]
 
         end_month_dt = pat_end + pd.Timedelta(days=rolling_window_high)
-        monthly_data = df.loc[pat_end:end_month_dt]
-        if len(monthly_data) < 2:
-            continue
+        monthly_data = post_pattern_data.loc[pat_end:end_month_dt]
 
         avgReturnForPattern = (
             pattern_data["close"].iloc[-1] / pattern_data["close"].iloc[0] - 1
         ) * 100
-        sevenDayReturnAfterPattern = (
-            weekly_data["close"].iloc[-1] / weekly_data["close"].iloc[0] - 1
-        ) * 100
-        monthlyReturnAfterPattern = (
-            monthly_data["close"].iloc[-1] / monthly_data["close"].iloc[0] - 1
-        ) * 100
+
+        sevenDayReturnAfterPattern = 0.0
+        if len(weekly_data) >= 2:
+            sevenDayReturnAfterPattern = (
+                weekly_data["close"].iloc[-1] / weekly_data["close"].iloc[0] - 1
+            ) * 100
+            seven_day_returns.append(sevenDayReturnAfterPattern)
+
+        monthlyReturnAfterPattern = 0.0
+        if len(monthly_data) >= 2:
+            monthlyReturnAfterPattern = (
+                monthly_data["close"].iloc[-1] / monthly_data["close"].iloc[0] - 1
+            ) * 100
+            monthly_returns.append(monthlyReturnAfterPattern)
 
         pattern_returns.append(avgReturnForPattern)
-        seven_day_returns.append(sevenDayReturnAfterPattern)
-        monthly_returns.append(monthlyReturnAfterPattern)
 
         forward_return.append(
             {
                 "patternIdx": idx,
-                "sevenDayReturnAfterPattern": sevenDayReturnAfterPattern,
-                "monthlyReturnAfterPattern": monthlyReturnAfterPattern,
+                "sevenDayReturnAfterPattern": float(sevenDayReturnAfterPattern),
+                "monthlyReturnAfterPattern": float(monthlyReturnAfterPattern),
             }
         )
 
