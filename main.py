@@ -557,13 +557,16 @@ async def Helper(ticker: str, start_date: str, end_date: str, timeframe: str = "
             await cursor.execute(
                 "select id from ticker_list where ticker = %s", (ticker,)
             )
-            ticker_id = await cursor.fetchone()[0]
+            ticker_id = await cursor.fetchone()
+            if not ticker_id:
+                raise ValueError(f"Ticker {ticker} not found in DB")
+            id = ticker_id[0]
 
             await cursor.execute(
                 """
                 select open,high,low,close from asset_prices where ticker_id = %s and timeframe = %s and date between %s  and %s order by date
                 """,
-                (ticker_id, timeframe, start_date, end_date),
+                (id, timeframe, start_date, end_date),
             )
 
             data = await cursor.fetchall()
@@ -578,12 +581,16 @@ async def calculate_query_return(ticker: str, start_date: str, end_date: str) ->
                 await cursor.execute(
                     "select id from ticker_list where ticker = %s", (ticker,)
                 )
-                ticker_id = await cursor.fetchone()[0]
+                ticker_id = await cursor.fetchone()
+                if not ticker_id:
+                    raise ValueError(f"Ticker {ticker} not found in DB")
+
+                id = ticker_id[0]
                 await cursor.execute(
                     """
                     select close from asset_prices where ticker_id = %s and date between %s and %s
                     """,
-                    (ticker_id, start_date, end_date),
+                    (id, start_date, end_date),
                 )
                 closes = await cursor.fetchall()
             query_return = (closes[-1][0] / closes[0][0]) - 1
