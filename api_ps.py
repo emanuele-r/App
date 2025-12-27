@@ -260,21 +260,20 @@ async def get_ohlc_endpoint(
     end_date: str = Query(default=None, description="End date interval(Optional)"),
     timeframe: str = Query(default="1d", description="Timeframe (Optional)"),
 ):
-    """
-    Get OHLC (Open, High, Low, Close) data for a ticker.
-
-    Example: POST /get_ohlc?ticker=btc-usd&start_date=2024-01-01&end_date=2024-12-31&timeframe=1d
-    """
     ticker = ticker.upper()
-		
     try:
-	cached_key= f"{ticker}:{start_date}:{end_date}:{timeframe}"
-	cached = await redis_client.get(cached_key)
-	if cached:
-	return orsjon.loads(cached)
+        cached_key = f"{ticker}:{start_date}:{end_date}:{timeframe}"
+        cached = await redis_client.get(cached_key)
+        if cached:
+            return orjson.loads(cached)
+
         data = await read_db_v2(
-            ticker=ticker, start_date=start_date, end_date=end_date, timeframe=timeframe
+            ticker=ticker,
+            start_date=start_date,
+            end_date=end_date,
+            timeframe=timeframe,
         )
+
         if data.empty:
             raise HTTPException(status_code=404, detail=f"No data found for {ticker}")
 
@@ -291,16 +290,13 @@ async def get_ohlc_endpoint(
                     "timeframe": str(data_row["timeframe"]),
                 }
             )
-	
-	await redis_client=set(cached_key, orjson.dumps(cached_key), ex=60)
+
+        await redis_client = set(cached_key, orjson.dumps(cached_key), ex=60)
 
         return ohlc_data
 
-    except HTTPException:
-        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.post("/get_mutiple_patterns")
 async def get_patterns(
@@ -321,7 +317,7 @@ async def get_patterns(
 
     ticker = ticker.upper()
     try:
-	cached_key = f"patterns:{ticker}:{start_date}:{end_date}:{timeframe}"
+        cached_key = f"patterns:{ticker}:{start_date}:{end_date}:{timeframe}"
 
         cached = await redis_client.get(cached_key)
         if cached:
@@ -346,10 +342,24 @@ async def get_patterns(
                 status_code=404, detail="No data found for the given date range"
             )
 
-        query_return = await calculate_query_return(ticker, start_date, end_date)
+        query_return = await calculate_query_return(
+            ticker, start_date, end_date
+        )
 
-        best_indices, best_dates, best_subarrays, best_distances, query, array2 = (
-            array_with_shift(query, array2, dates, k=k, metric=metric, wrap=wrap)
+        (
+            best_indices,
+            best_dates,
+            best_subarrays,
+            best_distances,
+            query,
+            array2,
+        ) = array_with_shift(
+            query,
+            array2,
+            dates,
+            k=k,
+            metric=metric,
+            wrap=wrap,
         )
 
         summary = await pattern_forward_return(ticker, best_dates)
@@ -366,13 +376,15 @@ async def get_patterns(
                 description=f"{ticker} pattern match {i + 1}",
             )
             matches.append(match)
-	 await redis_client.set(cached_key, orjson.dumps(matches), ex=3600)
 
+        await redis_client.set(cached_key, orjson.dumps(matches), ex=3600)
 
         return matches, summary
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Pattern search failed: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Pattern search failed: {str(e)}"
+        )
 
 
 @app.post("/get_multiple_patterns_ohcl")

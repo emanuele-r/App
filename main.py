@@ -11,6 +11,7 @@ import httpx
 import state
 import asyncio
 
+
 def create_db():
     with psycopg.connect(
         dbname="asset_prices",
@@ -437,7 +438,8 @@ async def read_db_v2(
                     else "2008-01-01"
                 )
 
-                upData = await asyncio.to_thread(get_data,
+                upData = await asyncio.to_thread(
+                    get_data,
                     ticker=ticker,
                     start_date=fetch_start_date,
                     end_date=today,
@@ -486,7 +488,7 @@ async def read_db_v2(
                     )
                 else:
                     await cursor.execute(
-                        "SELECT * FROM asset_prices WHERE ticker_id = %s AND timeframe = %s  ORDER BY date ASC" ,
+                        "SELECT * FROM asset_prices WHERE ticker_id = %s AND timeframe = %s  ORDER BY date ASC",
                         (ticker_id, timeframe),
                     )
 
@@ -577,7 +579,7 @@ async def calculate_query_return(ticker: str, start_date: str, end_date: str) ->
                     "select id from ticker_list where ticker = %s", (ticker,)
                 )
                 ticker_id = await cursor.fetchone()[0]
-               await cursor.execute(
+                await cursor.execute(
                     """
                     select close from asset_prices where ticker_id = %s and date between %s and %s
                     """,
