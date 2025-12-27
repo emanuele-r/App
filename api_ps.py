@@ -21,7 +21,9 @@ async def lifespan(app: FastAPI):
         min_size=5,
         max_size=20,
         timeout=30,
-    )
+        open=False,
+    ) 
+        
     await state.pg_pool.open()
     try:
         yield

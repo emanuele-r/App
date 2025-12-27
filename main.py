@@ -9,6 +9,8 @@ from dotenv import load_dotenv
 import psycopg
 import httpx
 import state
+
+
 def create_db():
     with psycopg.connect(
         dbname="asset_prices",
@@ -186,8 +188,6 @@ def create_db():
 
 
 create_db()
-
-
 
 
 async def readCategory():
@@ -412,81 +412,84 @@ async def read_db_v2(
     try:
         async with state.pg_pool.connection() as conn:
             async with conn.cursor() as cursor:
-
                 await cursor.execute(
                     "SELECT id FROM ticker_list WHERE ticker = %s", (ticker,)
                 )
                 ticker_id_row = await cursor.fetchone()
+                if not ticker_id_row:
+                    raise ValueError(f"Ticker {ticker} not found in DB")
                 ticker_id = ticker_id_row[0]
 
                 await cursor.execute(
-                    """select max(date) from asset_prices where ticker_id = %s
-                and timeframe = %s""",
+                    "SELECT MAX(date) FROM asset_prices WHERE ticker_id = %s AND timeframe = %s",
                     (ticker_id, timeframe),
                 )
-            isUpToDate = await cursor.fetchone()[0]
-            needs_update = isUpToDate != today
+                isUpToDate_row = await cursor.fetchone()
+                isUpToDate = isUpToDate_row[0] if isUpToDate_row else None
 
-            if needs_update:
+                needs_update = isUpToDate != today
 
-                if timeframe != "1d":
-                    upData = get_data(ticker=ticker, timeframe=timeframe)
-
-                else:
-                    upData = get_data(
-                        ticker=ticker,
-                        start_date="2008-01-01",
-                        end_date=today,
-                        timeframe=timeframe,
-                    )
-
-                if not upData.empty:
-
-                    records = [
-                        (
-                            ticker_id,
-                            str(row.date),
-                            row.open,
-                            row.high,
-                            row.low,
-                            row.close,
-                            row.change,
-                            row.period,
-                            timeframe,
+                if needs_update:
+                    if timeframe != "1d":
+                        upData = get_data(ticker=ticker, timeframe=timeframe)
+                    else:
+                        upData = get_data(
+                            ticker=ticker,
+                            start_date="2008-01-01",
+                            end_date=today,
+                            timeframe=timeframe,
                         )
-                        for row in upData.itertuples(index=False)
-                    ]
 
-                    await cursor.executemany(
-                        """INSERT INTO asset_prices 
-                    (ticker_id, date, open, high, low, close, change, period, timeframe)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (ticker_id, date, timeframe) DO UPDATE
-                    SET open = EXCLUDED.open,
-                    high = EXCLUDED.high,
-                    low = EXCLUDED.low,
-                    close = EXCLUDED.close,
-                    change = EXCLUDED.change,
-                    period = EXCLUDED.period""",
-                        records,
+                    if not upData.empty:
+                        records = [
+                            (
+                                ticker_id,
+                                str(row.date),
+                                row.open,
+                                row.high,
+                                row.low,
+                                row.close,
+                                row.change,
+                                row.period,
+                                timeframe,
+                            )
+                            for row in upData.itertuples(index=False)
+                        ]
+
+                        await cursor.executemany(
+                            """
+                            INSERT INTO asset_prices 
+                            (ticker_id, date, open, high, low, close, change, period, timeframe)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (ticker_id, date, timeframe) DO UPDATE
+                            SET open = EXCLUDED.open,
+                                high = EXCLUDED.high,
+                                low = EXCLUDED.low,
+                                close = EXCLUDED.close,
+                                change = EXCLUDED.change,
+                                period = EXCLUDED.period
+                            """,
+                            records,
+                        )
+
+                if start_date and end_date:
+                    await cursor.execute(
+                        """
+                        SELECT * FROM asset_prices 
+                        WHERE date BETWEEN %s AND %s AND ticker_id = %s AND timeframe = %s
+                        """,
+                        (start_date, end_date, ticker_id, timeframe),
+                    )
+                else:
+                    await cursor.execute(
+                        "SELECT * FROM asset_prices WHERE ticker_id = %s AND timeframe = %s",
+                        (ticker_id, timeframe),
                     )
 
-            if start_date and end_date:
-                await cursor.execute(
-                    "SELECT * FROM asset_prices "
-                    "WHERE date BETWEEN %s AND %s  AND ticker_id = %s AND timeframe = %s",
-                    (start_date, end_date, ticker_id, timeframe),
+                rows = await cursor.fetchall()
+                updated_data = pd.DataFrame(
+                    rows, columns=[col[0] for col in cursor.description]
                 )
-            else:
-                await cursor.execute(
-                    "SELECT * FROM asset_prices WHERE ticker_id= %s AND timeframe = %s",
-                    (ticker_id, timeframe),
-                )
-
-            rows = await cursor.fetchall()
-            updated_data = pd.DataFrame(
-                rows, columns=[col[0] for col in cursor.description]
-            )
 
     except Exception as e:
         raise ValueError(f"Error reading database : {e}")
