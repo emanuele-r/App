@@ -338,7 +338,6 @@ def RiskMetrics(ticker: str, risk_free_rate: float = 0.044) -> dict:
         "yield_spread": yield_spread,
     }
 
-
 def get_data(
     ticker: str,
     start_date: str = None,
@@ -346,51 +345,63 @@ def get_data(
     period: str = None,
     timeframe: str = "1d",
 ) -> pd.DataFrame:
-    if start_date and end_date:
-        data = yf.download(
-            ticker,
-            start=start_date,
-            end=end_date,
-            threads=True,
-            period=period,
-            interval=timeframe,
-            multi_level_index=False,
-        )[["Open", "High", "Low", "Close"]]
-    elif timeframe:
-        if timeframe.endswith("m"):
-            data = yf.download(
-                ticker,
-                period="1d",
-                interval=timeframe,
-                threads=True,
-                multi_level_index=False,
-            )[["Open", "High", "Low", "Close"]]
-        elif timeframe.endswith("h"):
-            data = yf.download(
-                ticker,
-                period="1mo",
-                interval=timeframe,
-                threads=True,
-                multi_level_index=False,
-            )[["Open", "High", "Low", "Close"]]
-        else:
-            data = yf.download(
-                ticker,
-                period="max",
-                interval=timeframe,
-                threads=True,
-                multi_level_index=False,
-            )[["Open", "High", "Low", "Close"]]
+    import yfinance as yf
+    import pandas as pd
 
-    data.reset_index(inplace=True)
-    data.columns = data.columns.str.lower()
-    if "datetime" in data.columns:
-        data.rename(columns={"datetime": "date"}, inplace=True)
+    data = pd.DataFrame()  # default empty DataFrame
 
-    data["ticker"] = ticker
-    data["timeframe"] = timeframe
-    data["period"] = period
-    data["change"] = data["close"].pct_change()
+    try:
+        if start_date and end_date:
+            data = yf.download(
+                ticker,
+                start=start_date,
+                end=end_date,
+                threads=True,
+                period=period,
+                interval=timeframe,
+                multi_level_index=False,
+            )
+        elif timeframe:
+            if timeframe.endswith("m"):
+                data = yf.download(
+                    ticker,
+                    period="1d",
+                    interval=timeframe,
+                    threads=True,
+                    multi_level_index=False,
+                )
+            elif timeframe.endswith("h"):
+                data = yf.download(
+                    ticker,
+                    period="1mo",
+                    interval=timeframe,
+                    threads=True,
+                    multi_level_index=False,
+                )
+            else:
+                data = yf.download(
+                    ticker,
+                    period="max",
+                    interval=timeframe,
+                    threads=True,
+                    multi_level_index=False,
+                )
+        if data is None or data.empty:
+            return pd.DataFrame()
+
+        data = data[["Open", "High", "Low", "Close"]]
+        data.reset_index(inplace=True)
+        data.columns = data.columns.str.lower()
+        if "datetime" in data.columns:
+            data.rename(columns={"datetime": "date"}, inplace=True)
+        data["date"] = pd.to_datetime(data["date"]).dt.tz_localize(None)
+        data["ticker"] = ticker
+        data["timeframe"] = timeframe
+        data["period"] = period
+        data["change"] = data["close"].pct_change()
+
+    except Exception:
+        return pd.DataFrame()  # never return None
 
     return data
 
@@ -403,7 +414,8 @@ TIMEFRAME_DELTAS = {
     "15m": pd.Timedelta(minutes=15),
 }
 
-async def update_ticker(state, ticker: str, timeframe: str):
+
+async def read_db_v2( ticker: str,start_date: str = None, end_date:str = None, period : str = None,  timeframe: str = "1d"):
     async with state.pg_pool.connection() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(
@@ -440,8 +452,7 @@ async def update_ticker(state, ticker: str, timeframe: str):
 
             if fetch_start >= fetch_end:
                 return
-
-            df = await asyncio.to_thread(
+	            df = await asyncio.to_thread(
                 get_data,
                 ticker=ticker,
                 start_date=fetch_start.strftime("%Y-%m-%d %H:%M:%S"),
@@ -483,6 +494,35 @@ async def update_ticker(state, ticker: str, timeframe: str):
                 """,
                 records,
             )
+         await cursor.executemany(
+                        """INSERT OR REPLACE INTO asset_prices
+                        (ticker_id, date, open, high, low, close, change,  period, timeframe)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ? )""",
+                        records,
+                    )
+
+            if start_date and end_date:
+                await cursor.execute(
+                    "SELECT * FROM asset_prices "
+                    "WHERE date BETWEEN ? AND ? AND ticker_id = ? AND timeframe = ?",
+                    (start_date, end_date, ticker_id, timeframe),
+                )
+            else:
+               await  cursor.execute(
+                    "SELECT * FROM asset_prices WHERE ticker_id= ? AND timeframe = ?",
+                    (ticker_id, timeframe),
+                )
+
+            rows = await cursor.fetchall()
+            updated_data = pd.DataFrame(
+                rows, columns=[col[0] for col in cursor.description]
+            )
+
+    except Exception as e:
+        raise ValueError(f"Error reading database : {e}")
+
+    return updated_data
+
 
 
 
