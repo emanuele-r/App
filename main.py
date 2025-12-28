@@ -338,6 +338,7 @@ def RiskMetrics(ticker: str, risk_free_rate: float = 0.044) -> dict:
         "yield_spread": yield_spread,
     }
 
+
 def get_data(
     ticker: str,
     start_date: str = None,
@@ -406,8 +407,6 @@ def get_data(
     return data
 
 
-
-
 TIMEFRAME_DELTAS = {
     "1d": pd.Timedelta(days=1),
     "1h": pd.Timedelta(hours=1),
@@ -415,115 +414,124 @@ TIMEFRAME_DELTAS = {
 }
 
 
-async def read_db_v2( ticker: str,start_date: str = None, end_date:str = None, period : str = None,  timeframe: str = "1d"):
-    async with state.pg_pool.connection() as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute(
-                "SELECT id FROM ticker_list WHERE ticker = %s",
-                (ticker,),
-            )
-            row = await cursor.fetchone()
-            if not row:
-                raise ValueError(f"Ticker {ticker} not found")
-
-            ticker_id = row[0]
-
-            await cursor.execute(
-                """
-                SELECT MAX(date)
-                FROM asset_prices
-                WHERE ticker_id = %s AND timeframe = %s
-                """,
-                (ticker_id, timeframe),
-            )
-            last_ts = (await cursor.fetchone())[0]
-
-            now = datetime.utcnow()
-
-            if last_ts is not None and last_ts >= now:
-                return
-
-            if last_ts is not None:
-                fetch_start = pd.Timestamp(last_ts) + TIMEFRAME_DELTAS[timeframe]
-            else:
-                fetch_start = pd.Timestamp("2008-01-01")
-
-            fetch_end = pd.Timestamp(now)
-
-            if fetch_start >= fetch_end:
-                return
-	            df = await asyncio.to_thread(
-                get_data,
-                ticker=ticker,
-                start_date=fetch_start.strftime("%Y-%m-%d %H:%M:%S"),
-                end_date=fetch_end.strftime("%Y-%m-%d %H:%M:%S"),
-                timeframe=timeframe,
-            )
-
-            if df.empty:
-                return
-
-            records = [
-                (
-                    ticker_id,
-                    row.date.to_pydatetime(),
-                    row.open,
-                    row.high,
-                    row.low,
-                    row.close,
-                    row.change,
-                    row.period,
-                    timeframe,
-                )
-                for row in df.itertuples(index=False)
-            ]
-
-            await cursor.executemany(
-                """
-                INSERT INTO asset_prices
-                    (ticker_id, date, open, high, low, close, change, period, timeframe)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (ticker_id, date, timeframe)
-                DO UPDATE SET
-                    open = EXCLUDED.open,
-                    high = EXCLUDED.high,
-                    low = EXCLUDED.low,
-                    close = EXCLUDED.close,
-                    change = EXCLUDED.change,
-                    period = EXCLUDED.period
-                """,
-                records,
-            )
-         await cursor.executemany(
-                        """INSERT OR REPLACE INTO asset_prices
-                        (ticker_id, date, open, high, low, close, change,  period, timeframe)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ? )""",
-                        records,
-                    )
-
-            if start_date and end_date:
+async def read_db_v2(
+    ticker: str,
+    start_date: str = None,
+    end_date: str = None,
+    period: str = None,
+    timeframe: str = "1d",
+):
+    try:
+        async with state.pg_pool.connection() as conn:
+            async with conn.cursor() as cursor:
                 await cursor.execute(
-                    "SELECT * FROM asset_prices "
-                    "WHERE date BETWEEN ? AND ? AND ticker_id = ? AND timeframe = ?",
-                    (start_date, end_date, ticker_id, timeframe),
+                    "SELECT id FROM ticker_list WHERE ticker = %s",
+                    (ticker,),
                 )
-            else:
-               await  cursor.execute(
-                    "SELECT * FROM asset_prices WHERE ticker_id= ? AND timeframe = ?",
+                row = await cursor.fetchone()
+                if not row:
+                    raise ValueError(f"Ticker {ticker} not found")
+                ticker_id = row[0]
+
+                await cursor.execute(
+                    """
+                    SELECT MAX(date)
+                    FROM asset_prices
+                    WHERE ticker_id = %s AND timeframe = %s
+                    """,
                     (ticker_id, timeframe),
                 )
+                last_ts = (await cursor.fetchone())[0]
 
-            rows = await cursor.fetchall()
-            updated_data = pd.DataFrame(
-                rows, columns=[col[0] for col in cursor.description]
-            )
+                now = datetime.utcnow()
+
+                if last_ts is not None and last_ts >= now:
+                    return pd.DataFrame()
+
+                if last_ts is not None:
+                    fetch_start = pd.Timestamp(last_ts) + TIMEFRAME_DELTAS[timeframe]
+                else:
+                    fetch_start = pd.Timestamp("2008-01-01")
+
+                fetch_end = pd.Timestamp(now)
+
+                if fetch_start >= fetch_end:
+                    return pd.DataFrame()
+
+                df = await asyncio.to_thread(
+                    get_data,
+                    ticker=ticker,
+                    start_date=fetch_start.strftime("%Y-%m-%d %H:%M:%S"),
+                    end_date=fetch_end.strftime("%Y-%m-%d %H:%M:%S"),
+                    timeframe=timeframe,
+                )
+
+                if df is None or df.empty:
+                    return pd.DataFrame()
+
+                records = [
+                    (
+                        ticker_id,
+                        pd.to_datetime(row.date).tz_localize(None).to_pydatetime(),
+                        row.open,
+                        row.high,
+                        row.low,
+                        row.close,
+                        row.change,
+                        row.period,
+                        timeframe,
+                    )
+                    for row in df.itertuples(index=False)
+                ]
+
+                await cursor.executemany(
+                    """
+                    INSERT INTO asset_prices
+                        (ticker_id, date, open, high, low, close, change, period, timeframe)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (ticker_id, date, timeframe)
+                    DO UPDATE SET
+                        open = EXCLUDED.open,
+                        high = EXCLUDED.high,
+                        low = EXCLUDED.low,
+                        close = EXCLUDED.close,
+                        change = EXCLUDED.change,
+                        period = EXCLUDED.period
+                    """,
+                    records,
+                )
+
+                if start_date and end_date:
+                    await cursor.execute(
+                        """
+                        SELECT *
+                        FROM asset_prices
+                        WHERE date BETWEEN %s AND %s
+                          AND ticker_id = %s
+                          AND timeframe = %s
+                        """,
+                        (start_date, end_date, ticker_id, timeframe),
+                    )
+                else:
+                    await cursor.execute(
+                        """
+                        SELECT *
+                        FROM asset_prices
+                        WHERE ticker_id = %s
+                          AND timeframe = %s
+                        """,
+                        (ticker_id, timeframe),
+                    )
+
+                rows = await cursor.fetchall()
+                updated_data = pd.DataFrame(
+                    rows, columns=[col[0] for col in cursor.description]
+                )
+
+        return updated_data
 
     except Exception as e:
-        raise ValueError(f"Error reading database : {e}")
-
-    return updated_data
-
-
+        raise ValueError(f"Error reading database: {e}")
 
 
 async def helperFunctionPattern(
