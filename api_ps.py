@@ -424,9 +424,9 @@ async def get_patterns_ohlc(
         if not query_data or not reference_data:
             raise HTTPException(status_code=404, detail="Pattern data unavailable")
 
-        query = [row[3] for row in query_data]
-        array2 = [row[3] for row in reference_data]
-        dates = [row[4] for row in reference_data]
+        query = [row[4] for row in query_data]
+        array2 = [row[4] for row in reference_data]
+        dates = [row[0] for row in reference_data]
 
         query_return = await calculate_query_return(ticker, start_date, end_date)
 
@@ -453,6 +453,9 @@ async def get_patterns_ohlc(
 
         response_data = {
             "ticker": ticker,
+            "start_date": start_date,
+            "end_date": end_date,
+            "timeframe": timeframe,
             "query_return": float(query_return),
             "patterns": patterns,
         }
