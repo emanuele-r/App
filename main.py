@@ -350,7 +350,7 @@ def get_data(
     import yfinance as yf
     import pandas as pd
 
-    data = pd.DataFrame()  # default empty DataFrame
+    data = pd.DataFrame()  
 
     try:
         if start_date and end_date:
@@ -403,16 +403,11 @@ def get_data(
         data["change"] = data["close"].pct_change()
 
     except Exception:
-        return pd.DataFrame()  # never return None
+        return pd.DataFrame()  
 
     return data
 
 
-TIMEFRAME_DELTAS = {
-    "1d": pd.Timedelta(days=1),
-    "1h": pd.Timedelta(hours=1),
-    "15m": pd.Timedelta(minutes=15),
-}
 
 
 async def read_db_v2(
@@ -447,18 +442,17 @@ async def read_db_v2(
                 now = date.today()
 
                 if last_ts is not None:
-                    fetch_start = pd.Timestamp(last_ts) + TIMEFRAME_DELTAS[timeframe]
+                    fetch_start = (last_ts + timedelta(seconds=1)).strftime("%Y-%m-%d %H:%M:%S")
                 else:
-                    fetch_start = pd.Timestamp("2008-01-01")
+                    fetch_start = "2008-01-01"
 
-                fetch_end = now
                 
-                if fetch_start < fetch_end:
+                if not last_ts or last_ts.date() < now :
                     df = await asyncio.to_thread(
                     get_data,
                     ticker=ticker,
-                    start_date=fetch_start.strftime("%Y-%m-%d %H:%M:%S"),
-                    end_date=fetch_end.strftime("%Y-%m-%d %H:%M:%S"),
+                    start_date=fetch_start,
+                    end_date=None,
                     timeframe=timeframe,
                     )
 
@@ -468,7 +462,7 @@ async def read_db_v2(
                 records = [
                     (
                         ticker_id,
-                        pd.to_datetime(row.date).tz_localize(None).to_pydatetime(),
+                        row.date.to_pydatetime(),
                         row.open,
                         row.high,
                         row.low,
