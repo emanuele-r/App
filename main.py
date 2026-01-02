@@ -10,6 +10,7 @@ import psycopg
 import httpx
 import state
 import asyncio
+from datetime import date
 
 
 def create_db():
@@ -443,7 +444,7 @@ async def read_db_v2(
                 )
                 last_ts = (await cursor.fetchone())[0]
 
-                now = datetime.utcnow()
+                now = date.today()
 
                 if last_ts is not None and last_ts >= now:
                     return pd.DataFrame()
@@ -509,6 +510,8 @@ async def read_db_v2(
                         WHERE date BETWEEN %s AND %s
                           AND ticker_id = %s
                           AND timeframe = %s
+                        ORDER BY date asc
+                          
                         """,
                         (start_date, end_date, ticker_id, timeframe),
                     )
@@ -519,6 +522,7 @@ async def read_db_v2(
                         FROM asset_prices
                         WHERE ticker_id = %s
                           AND timeframe = %s
+                        ORDER BY date asc
                         """,
                         (ticker_id, timeframe),
                     )
