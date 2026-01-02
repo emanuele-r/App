@@ -446,26 +446,21 @@ async def read_db_v2(
 
                 now = date.today()
 
-                if last_ts is not None and last_ts >= now:
-                    return pd.DataFrame()
-
                 if last_ts is not None:
                     fetch_start = pd.Timestamp(last_ts) + TIMEFRAME_DELTAS[timeframe]
                 else:
                     fetch_start = pd.Timestamp("2008-01-01")
 
-                fetch_end = pd.Timestamp(now)
-
-                if fetch_start >= fetch_end:
-                    return pd.DataFrame()
-
-                df = await asyncio.to_thread(
+                fetch_end = now
+                
+                if fetch_start < fetch_end:
+                    df = await asyncio.to_thread(
                     get_data,
                     ticker=ticker,
                     start_date=fetch_start.strftime("%Y-%m-%d %H:%M:%S"),
                     end_date=fetch_end.strftime("%Y-%m-%d %H:%M:%S"),
                     timeframe=timeframe,
-                )
+                    )
 
                 if df is None or df.empty:
                     return pd.DataFrame()
