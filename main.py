@@ -11,6 +11,7 @@ import httpx
 import state
 import asyncio
 from datetime import date
+from math import sqrt
 
 
 def create_db():
@@ -323,6 +324,28 @@ def RiskMetrics(ticker: str, risk_free_rate: float = 0.044) -> dict:
     vix = yf.Ticker("^VIX").fast_info["last_price"]
     price_of_risk = earnings_yield / (vix / 100)
 
+    sigma_30d = vix / 100
+
+    exp_move_7d = price * sigma_30d * np.sqrt(7 / 252)
+    exp_move_30d = price * sigma_30d * np.sqrt(30 / 252)
+    exp_move_1y = price * sigma_30d
+
+    vol_60d = returns.std() * sqrt(252)
+    realized_var = vol_60d**2
+    implied_var = sigma_30d**2
+    vrp = implied_var - realized_var
+
+    regime_score = yield_spread - vrp - (exp_move_30d / price)
+
+    if vrp < 0 and yield_spread < 0:
+        regime = "Stress / Deleveraging"
+    elif vrp < 0 and exp_move_30d / price < 0.02:
+        regime = "Bubble / Underpriced Risk"
+    elif vrp > 0 and yield_spread > 0:
+        regime = "Risk-Off / Defensive"
+    else:
+        regime = "Neutral / Transition"
+
     if eps <= 0 or price <= 0 or vix <= 0 or ebitda <= 0 or market_cap <= 0:
         raise ValueError("Invalid inputs for valuation or risk metrics")
 
@@ -337,6 +360,12 @@ def RiskMetrics(ticker: str, risk_free_rate: float = 0.044) -> dict:
         "leverage": leverage,
         "vix": vix,
         "yield_spread": yield_spread,
+        "exp_move_7d": exp_move_7d,
+        "exp_move_30d": exp_move_30d,
+        "exp_move_1y": exp_move_1y,
+        "VarianceRiskPremium": vrp,
+        "regime_score": regime_score,
+        "regimeClassification": regime,
     }
 
 
@@ -350,7 +379,7 @@ def get_data(
     import yfinance as yf
     import pandas as pd
 
-    data = pd.DataFrame()  
+    data = pd.DataFrame()
 
     try:
         if start_date and end_date:
@@ -403,11 +432,9 @@ def get_data(
         data["change"] = data["close"].pct_change()
 
     except Exception:
-        return pd.DataFrame()  
+        return pd.DataFrame()
 
     return data
-
-
 
 
 async def read_db_v2(
@@ -442,18 +469,19 @@ async def read_db_v2(
                 now = date.today()
 
                 if last_ts is not None:
-                    fetch_start = (last_ts + timedelta(seconds=1)).strftime("%Y-%m-%d %H:%M:%S")
+                    fetch_start = (last_ts + timedelta(seconds=1)).strftime(
+                        "%Y-%m-%d %H:%M:%S"
+                    )
                 else:
                     fetch_start = "2008-01-01"
 
-                
-                if not last_ts or last_ts.date() < now :
+                if not last_ts or last_ts.date() < now:
                     df = await asyncio.to_thread(
-                    get_data,
-                    ticker=ticker,
-                    start_date=fetch_start,
-                    end_date=None,
-                    timeframe=timeframe,
+                        get_data,
+                        ticker=ticker,
+                        start_date=fetch_start,
+                        end_date=None,
+                        timeframe=timeframe,
                     )
 
                 if df is None or df.empty:
@@ -568,14 +596,14 @@ async def helperFunctionOhlcPattern(
             id = ticker_id[0]
             if start_date and end_date:
                 await cursor.execute(
-                "select date,open,high,low,close from asset_prices where ticker_id = %s and timeframe = %s and date between %s and %s order by date",
-                (id, timeframe, start_date, end_date),
-            )
+                    "select date,open,high,low,close from asset_prices where ticker_id = %s and timeframe = %s and date between %s and %s order by date",
+                    (id, timeframe, start_date, end_date),
+                )
             else:
                 await cursor.execute(
-                "select date,open,high,low,close from asset_prices where ticker_id = %s and timeframe = %s order by date",
-                (id, timeframe),
-            )
+                    "select date,open,high,low,close from asset_prices where ticker_id = %s and timeframe = %s order by date",
+                    (id, timeframe),
+                )
 
             data = await cursor.fetchall()
         return data
