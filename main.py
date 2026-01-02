@@ -568,12 +568,12 @@ async def helperFunctionOhlcPattern(
             id = ticker_id[0]
             if start_date and end_date:
                 await cursor.execute(
-                "select date,open,high,low,close from asset_prices where ticker_id = ? and timeframe = ? and date between ? and ? order by date",
+                "select date,open,high,low,close from asset_prices where ticker_id = %s and timeframe = %s and date between %s and %s order by date",
                 (id, timeframe, start_date, end_date),
             )
             else:
                 await cursor.execute(
-                "select date,open,high,low,close from asset_prices where ticker_id = ? and timeframe = ? order by date",
+                "select date,open,high,low,close from asset_prices where ticker_id = %s and timeframe = %s order by date",
                 (id, timeframe),
             )
 
